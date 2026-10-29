@@ -1,0 +1,34 @@
+# /etc/systemd/system/stalwart.service — adapt to how Stalwart is installed (package, container or binary).
+# This template assumes a binary install and a dedicated data directory.
+[Unit]
+Description=Stalwart Mail Server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=stalwart
+Group=stalwart
+WorkingDirectory=/var/lib/stalwart
+Environment="STALWART_CONFIG=/etc/stalwart/config.toml"
+# Start with the documented flags for your installed version, e.g. `stalwart --config ...`.
+ExecStart=/usr/local/bin/stalwart --config /etc/stalwart/config.toml
+Restart=always
+RestartSec=5
+LimitNOFILE=65535
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/stalwart
+ReadWritePaths=/var/log/stalwart
+
+[Install]
+WantedBy=multi-user.target
+
+# Network requirements (firewall, not this unit):
+#   allow 25/tcp, 465/tcp, 993/tcp, 443/tcp (JMAP/WebUI), optionally 4190/tcp
+#   bind the management/HTTP listener used by the control plane to 127.0.0.1 or a private network
+#   never expose the setup wizard or management API publicly
+# Verify: ss -lntp | grep -E ':(25|465|993|443|8080)\b'

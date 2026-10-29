@@ -1,0 +1,182 @@
+openapi: 3.1.0
+info:
+  title: ARTHVEX Mail API
+  version: 0.2.0
+  description: >
+    Control-plane and webmail API. Hand-maintained summary: request/response schemas in the TypeScript
+    route and service modules are authoritative. All routes are under /api/v1. Authenticated writes
+    also require the x-csrf-token header returned by GET /me.
+servers:
+  - url: /api/v1
+security:
+  - sessionCookie: []
+paths:
+  /health:
+    get:
+      summary: Liveness
+      security: []
+      responses: { '200': { description: Alive } }
+  /health/ready:
+    get:
+      summary: Readiness (database check)
+      security: []
+      responses:
+        '200': { description: Ready }
+        '503': { description: Not ready }
+  /me:
+    get:
+      summary: Current principal, CSRF token and workspace memberships
+      responses: { '200': { description: Current session } }
+  /auth/login:
+    post:
+      summary: Sign in (creates an MFA-pending session when MFA is enabled)
+      security: []
+      responses:
+        '200': { description: Session cookie set; returns csrfToken and mfaRequired }
+        '401': { description: Invalid credentials }
+  /auth/logout:
+    post:
+      summary: Revoke the current session
+      responses: { '200': { description: Signed out } }
+  /tenants/{tenantId}/mailboxes:
+    get:
+      summary: List mailboxes in a workspace
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string, minLength: 26, maxLength: 26 } }
+      responses:
+        '200': { description: Mailbox list }
+        '404': { description: Workspace not found or not a member }
+  /tenants/{tenantId}/mailboxes/{mailboxId}/webmail/folders:
+    get:
+      summary: Webmail folders
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string } }
+        - { name: mailboxId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Folders with counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  folders:
+                    type: array
+                    items: { $ref: '#/components/schemas/Folder' }
+  /tenants/{tenantId}/mailboxes/{mailboxId}/webmail/messages:
+    get:
+      summary: Paged, mailbox-scoped message search
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string } }
+        - { name: mailboxId, in: path, required: true, schema: { type: string } }
+        - { name: folderId, in: query, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string, maxLength: 200 } }
+        - { name: page, in: query, schema: { type: integer, minimum: 1, default: 1 } }
+        - { name: pageSize, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+      responses:
+        '200': { description: Message summaries and total }
+        '404': { description: Mailbox not found for this principal }
+  /tenants/{tenantId}/mailboxes/{mailboxId}/webmail/messages/{messageId}:
+    get:
+      summary: Read a message (server-sanitised HTML; remote images blocked by default)
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string } }
+        - { name: mailboxId, in: path, required: true, schema: { type: string } }
+        - { name: messageId, in: path, required: true, schema: { type: string } }
+        - { name: images, in: query, schema: { type: string, enum: [true, false], default: false } }
+      responses:
+        '200': { description: Message detail }
+        '503': { description: Mail engine or mailbox key unavailable }
+  /tenants/{tenantId}/mailboxes/{mailboxId}/webmail/send:
+    post:
+      summary: Submit a message through the mailbox-scoped JMAP key
+      parameters:
+        - { name: tenantId, in: path, required: true, schema: { type: string } }
+        - { name: mailboxId, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/Compose' }
+      responses:
+        '200': { description: Submitted; message moved to Sent }
+        '400': { description: Validation failure }
+        '413': { description: Attachment too large }
+        '503': { description: Mail engine unavailable; the draft is preserved }
+  /admin/access-grants:
+    get:
+      summary: List exceptional-access grants
+      responses: { '200': { description: Grants } }
+    post:
+      summary: Request temporary read access to one mailbox
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mailboxId, reason]
+              properties:
+                mailboxId: { type: string }
+                reason: { type: string, minLength: 10, maxLength: 500 }
+                scope: { type: string, enum: [read], default: read }
+                supportTicketId: { type: string }
+      responses:
+        '201': { description: Pending approval }
+        '403': { description: Missing admin.access.request }
+        '409': { description: A pending or active grant already exists }
+  /admin/access-grants/{grantId}/approve:
+    post:
+      summary: Approve a grant (a different super admin must do this)
+      parameters:
+        - { name: grantId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Active grant with expiry }
+        '403': { description: Requester cannot approve their own grant }
+  /admin/access-grants/{grantId}/messages:
+    get:
+      summary: Read messages under a valid grant (audited per call)
+      parameters:
+        - { name: grantId, in: path, required: true, schema: { type: string } }
+        - { name: folderId, in: query, schema: { type: string } }
+      responses:
+        '200': { description: Message summaries }
+        '403': { description: Grant inactive, expired, revoked or issued to another operator }
+components:
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: __Host-arthvex_sid
+  schemas:
+    Folder:
+      type: object
+      required: [id, name, role]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        role: { type: string, enum: [inbox, sent, drafts, trash, junk, archive, other] }
+        totalMessages: { type: integer }
+        unreadMessages: { type: integer }
+        parentId: { type: [string, 'null'] }
+    Compose:
+      type: object
+      required: [to]
+      properties:
+        to: { type: array, items: { type: string }, maxItems: 100 }
+        cc: { type: array, items: { type: string } }
+        bcc: { type: array, items: { type: string } }
+        subject: { type: string, maxLength: 500 }
+        text: { type: string }
+        html: { type: [string, 'null'] }
+        draftId: { type: string }
+        attachments:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [name, type, data]
+            properties:
+              name: { type: string }
+              type: { type: string }
+              data: { type: string, contentEncoding: base64 }

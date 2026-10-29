@@ -1,0 +1,39 @@
+{
+  "name": "arthvex-email-platform",
+  "private": true,
+  "version": "0.1.0",
+  "description": "ARTHVEX Email Hosting Platform — multi-tenant control plane for Stalwart Mail Server",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev:api": "npm run dev -w @arthvex/backend",
+    "dev:worker": "npm run dev:worker -w @arthvex/backend",
+    "dev:web": "npm run dev -w @arthvex/frontend",
+    "db:migrate": "npm run db:migrate -w @arthvex/backend",
+    "db:rollback": "npm run db:rollback -w @arthvex/backend",
+    "db:seed:dev": "npm run db:seed:dev -w @arthvex/backend",
+    "admin:create": "npm run admin:create -w @arthvex/backend",
+    "lint": "eslint .",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test -w @arthvex/backend",
+    "test:web": "npm run test -w @arthvex/frontend",
+    "build": "npm run build -w @arthvex/frontend"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@types/node": "^24.10.0",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "tsx": "^4.23.15",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
+  }
+}
