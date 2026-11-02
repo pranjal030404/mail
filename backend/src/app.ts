@@ -7,6 +7,7 @@ import { authRoutes } from './modules/auth/auth.routes.js';
 import { healthRoutes } from './modules/health/health.routes.js';
 import { tenantRoutes } from './modules/tenants/tenants.routes.js';
 import { adminRoutes } from './modules/admin/admin.routes.js';
+import { consoleRoutes } from './modules/admin/console.routes.js';
 import { aliasRoutes } from './modules/aliases/aliases.routes.js';
 import { domainRoutes } from './modules/domains/domains.routes.js';
 import { mailboxRoutes } from './modules/mailboxes/mailboxes.routes.js';
@@ -64,6 +65,7 @@ export async function buildApp(ctx: AppContext): Promise<FastifyInstance> {
       await usageRoutes(api, ctx);
       await supportRoutes(api, ctx);
       await adminRoutes(api, ctx);
+      await consoleRoutes(api, ctx);
       await webmailRoutes(api, ctx);
     },
     { prefix: '/api/v1' },

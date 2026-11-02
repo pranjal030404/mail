@@ -1,76 +1,19 @@
 import { useState } from 'react';
 import { Link, Navigate, Route, Routes, useParams } from 'react-router-dom';
-import { Alert, Button, Card, ConfirmDialog, DevBanner, ErrorAlert, PageHeader, SelectField, Spinner, StatusBadge, TextArea, TextField } from '../../components/ui';
+import { Alert, Button, Card, ErrorAlert, PageHeader, SelectField, Spinner, StatusBadge, TextArea } from '../../components/ui';
 import { get, patch, post } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
 import { formatBytes, formatDate, timeAgo } from '../../lib/format';
 import { useAsync } from '../../lib/useAsync';
 import Access from './Access';
-
-type Row = Record<string, any>;
-const Table = ({ head, rows, empty = 'Nothing to show.' }: { head: string[]; rows: React.ReactNode[][]; empty?: string }) =>
-  rows.length === 0 ? <p className="muted">{empty}</p> : (
-    <div className="table-wrap"><table><thead><tr>{head.map((h) => <th key={h}>{h}</th>)}</tr></thead><tbody>{rows.map((r, i) => <tr key={i}>{r.map((c, j) => <td key={j}>{c}</td>)}</tr>)}</tbody></table></div>
-  );
-
-function Overview() {
-  const q = useAsync(() => get<Row>('/admin/metrics'), []);
-  const m = q.data;
-  return (
-    <>
-      <PageHeader title="Platform overview" actions={<Button onClick={q.reload}>Refresh</Button>} />
-      {q.loading && !m && <Spinner />}
-      <ErrorAlert error={q.error} onRetry={q.reload} />
-      {m && (
-        <>
-          <DevBanner simulated={m.platform.simulatedMail} />
-          {m.backup.stale && !m.platform.simulatedMail && <Alert kind="error" title="Backups are stale or have never succeeded">No successful backup within the expected window. See the backup runbook.</Alert>}
-          {!m.services.workers.ok && <Alert kind="error" title="No worker heartbeat">Provisioning jobs will not run until a worker is started.</Alert>}
-          {!m.services.mailEngine.ok && <Alert kind="error" title="Mail engine unreachable">{m.services.mailEngine.detail}</Alert>}
-          {m.platform.maintenanceMode && <Alert kind="warning" title="Maintenance mode is ON">Customers are blocked.</Alert>}
-          <div className="grid">
-            {[['Active tenants', m.counts.tenants_active], ['Suspended tenants', m.counts.tenants_suspended], ['Verified domains', m.counts.domains_verified], ['Active mailboxes', m.counts.mailboxes_active],
-              ['Suspended mailboxes', m.counts.mailboxes_suspended], ['Failed provisioning (mailboxes)', m.counts.mailboxes_failed], ['Open abuse reports', m.counts.abuse_open], ['Open tickets', m.counts.tickets_open]].map(([l, v]) => (
-              <Card key={l as string}><div className="stat">{v as number}</div><div className="stat-label">{l}</div></Card>
-            ))}
-            <Card><div className="stat">{formatBytes(m.counts.storage_used)}</div><div className="stat-label">Storage used of {formatBytes(m.counts.storage_allocated)} allocated</div></Card>
-          </div>
-          <Card title="Services">
-            <Table head={['Service', 'Status', 'Detail']} rows={[
-              ['Database', <StatusBadge status="ok" />, 'Reachable'],
-              ['Mail engine', <StatusBadge status={m.services.mailEngine.ok ? 'ok' : 'error'} />, `${m.services.mailEngine.description}: ${m.services.mailEngine.detail}`],
-              ['Webmail', <StatusBadge status={m.services.webmail?.ok ? 'ok' : 'warning'} />, `${m.services.webmail?.description ?? 'not configured'}: ${m.services.webmail?.detail ?? ''}`],
-              ['Workers', <StatusBadge status={m.services.workers.ok ? 'ok' : 'error'} />, `${m.services.workers.live} live`],
-              ['Notification mailer', <StatusBadge status={m.services.mailer.kind === 'smtp' ? 'ok' : 'warning'} />, m.services.mailer.kind === 'smtp' ? 'SMTP' : 'Development outbox (not sent)'],
-            ]} />
-            <p className="muted"><small>{m.mailQueue}</small></p>
-          </Card>
-          <Card title="Provisioning queue">
-            <div className="row">{Object.entries(m.jobs as Record<string, number>).map(([k, v]) => <span key={k}><StatusBadge status={k} /> {v}</span>)}{Object.keys(m.jobs).length === 0 && <span className="muted">Queue is empty.</span>}</div>
-          </Card>
-          <Card title="Backups">
-            <Table head={['', 'Status', 'Finished', 'Note']} rows={[
-              ['Last backup', m.backup.lastBackup ? <StatusBadge status={m.backup.lastBackup.status} /> : 'none recorded', formatDate(m.backup.lastBackup?.finished_at), m.backup.lastBackup?.message ?? ''],
-              ['Last restore test', m.backup.lastRestoreTest ? <StatusBadge status={m.backup.lastRestoreTest.status} /> : 'none recorded', formatDate(m.backup.lastRestoreTest?.finished_at), m.backup.lastRestoreTest?.message ?? ''],
-            ]} />
-          </Card>
-          <Card title="Sign-up"><p>Mode: <strong>{m.platform.signupMode.replace('_', ' ')}</strong>. Change in <Link to="/admin/settings">Settings</Link>.</p></Card>
-        </>
-      )}
-    </>
-  );
-}
-
-/** Dialog helper: every sensitive action collects a reason and sends `confirm: true`. */
-function useSensitive() {
-  const [action, setAction] = useState<{ title: string; label: string; danger?: boolean; typed?: string; run: (reason: string) => Promise<unknown>; body?: string } | null>(null);
-  const dialog = (done: () => void) => (
-    <ConfirmDialog open={!!action} title={action?.title ?? ''} confirmLabel={action?.label ?? 'Confirm'} {...(action?.danger ? { danger: true } : {})} {...(action?.typed ? { typeToConfirm: action.typed } : {})} askReason onCancel={() => setAction(null)} onConfirm={async (reason) => { await action!.run(reason); setAction(null); done(); }}>
-      <p>{action?.body ?? 'This action is recorded in the audit log with your name and the reason below.'}</p>
-    </ConfirmDialog>
-  );
-  return { setAction, dialog };
-}
+import CreateUser from './CreateUser';
+import Dashboard from './Dashboard';
+import { Can, Table, useSensitive, type Row } from './kit';
+import Mailboxes, { CreateMailbox, MailboxDetail } from './Mailboxes';
+import { AuditLog, Domains, Notifications, Plans } from './Operations';
+import Roles, { Admins, RoleEditor } from './Roles';
+import UserDetail from './UserDetail';
+import Users, { Invitations } from './Users';
 
 function Tenants() {
   const [q, setQ] = useState('');
@@ -176,40 +119,6 @@ function SupportQueue() {
   );
 }
 
-function Users() {
-  const [qs, setQs] = useState('');
-  const [query, setQuery] = useState('');
-  const q = useAsync(() => get<{ users: Row[] }>(`/admin/users${query ? `?q=${encodeURIComponent(query)}` : ''}`), [query]);
-  const admins = useAsync(() => get<{ admins: Row[] }>('/admin/admins'), []);
-  const [email, setEmail] = useState('');
-  const [error, setError] = useState<unknown>(null);
-  const [ok, setOk] = useState('');
-  const s = useSensitive();
-  return (
-    <>
-      <PageHeader title="Users and invitations" />
-      <Card title="Invite to the private beta">
-        <form className="row" style={{ alignItems: 'flex-end' }} onSubmit={async (e) => { e.preventDefault(); setError(null); setOk(''); try { await post('/admin/signup-invitations', { email }); setOk(`Invitation sent to ${email}.`); setEmail(''); } catch (err) { setError(err); } }}>
-          <TextField label="Email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} /><Button type="submit" variant="primary">Send invitation</Button>
-        </form>
-        <ErrorAlert error={error} />{ok && <Alert kind="success">{ok}</Alert>}
-      </Card>
-      <Card>
-        <form className="row" role="search" onSubmit={(e) => { e.preventDefault(); setQuery(qs); }}><input aria-label="Search users" placeholder="Email…" value={qs} onChange={(e) => setQs(e.target.value)} style={{ maxWidth: 300 }} /><Button type="submit">Search</Button></form>
-      </Card>
-      {q.data && <Card><Table head={['Email', 'Status', 'Platform role', '2FA', 'Last sign-in', '']} rows={q.data.users.map((u) => [u.email, <StatusBadge status={u.status} />, u.platform_role, u.mfa_enabled ? 'yes' : 'no', timeAgo(u.last_login_at),
-        <span className="row"><Button small onClick={() => s.setAction({ title: `Sign ${u.email} out everywhere`, label: 'Revoke sessions', run: (reason) => post(`/admin/users/${u.id}/revoke-sessions`, { reason, confirm: true }) })}>Revoke sessions</Button>{u.status === 'active' && <Button small variant="danger" onClick={() => s.setAction({ title: `Suspend ${u.email}`, label: 'Suspend user', danger: true, run: (reason) => post(`/admin/users/${u.id}/suspend`, { reason, confirm: true }) })}>Suspend</Button>}</span>])} /></Card>}
-      <Card title="Platform administrators">
-        <p className="muted">Separate from customer accounts. Seeded or updated with <code>npm run admin:create</code> using ADMIN_EMAIL / ADMIN_PASSWORD from backend/.env.</p>
-        {admins.loading && !admins.data && <Spinner />}<ErrorAlert error={admins.error} onRetry={admins.reload} />
-        {admins.data && <Table head={['Email', 'Status', 'Role', '2FA', 'Last sign-in', '']} rows={admins.data.admins.map((u) => [u.email, <StatusBadge status={u.status} />, u.platform_role, u.mfa_enabled ? 'yes' : 'no', timeAgo(u.last_login_at),
-          <span className="row"><Button small onClick={() => s.setAction({ title: `Sign ${u.email} out everywhere`, label: 'Revoke sessions', run: (reason) => post(`/admin/admins/${u.id}/revoke-sessions`, { reason, confirm: true }) })}>Revoke sessions</Button>{u.status === 'active' && <Button small variant="danger" onClick={() => s.setAction({ title: `Suspend ${u.email}`, label: 'Suspend administrator', danger: true, run: (reason) => post(`/admin/admins/${u.id}/suspend`, { reason, confirm: true }) })}>Suspend</Button>}</span>])} empty="No platform administrators." />}
-      </Card>
-      {s.dialog(() => { void q.reload(); void admins.reload(); })}
-    </>
-  );
-}
-
 function Settings() {
   const q = useAsync(() => get<Row>('/admin/settings'), []);
   const s = useSensitive();
@@ -238,33 +147,34 @@ function Settings() {
   );
 }
 
-function Audit() {
-  const [action, setAction] = useState('');
-  const [applied, setApplied] = useState('');
-  const q = useAsync(() => get<{ entries: Row[] }>(`/admin/audit${applied ? `?action=${encodeURIComponent(applied)}` : ''}`), [applied]);
-  return (
-    <>
-      <PageHeader title="Audit log" subtitle="Privileged and security-relevant events. Secrets are never recorded." />
-      <Card><form className="row" role="search" onSubmit={(e) => { e.preventDefault(); setApplied(action); }}><input aria-label="Action prefix" placeholder="Action prefix, e.g. admin." value={action} onChange={(e) => setAction(e.target.value)} style={{ maxWidth: 300 }} /><Button type="submit">Filter</Button></form></Card>
-      {q.loading && <Spinner />}<ErrorAlert error={q.error} onRetry={q.reload} />
-      {q.data && <Card><Table head={['When', 'Action', 'Outcome', 'Actor', 'Target', 'Reason', 'Correlation']} rows={q.data.entries.map((a) => [formatDate(a.occurred_at), a.action, <StatusBadge status={a.outcome === 'success' ? 'ok' : 'error'} label={a.outcome} />, `${a.actor_type}${a.actor_user_id ? ` …${String(a.actor_user_id).slice(-6)}` : ''}`, a.target_type ? `${a.target_type} …${String(a.target_id ?? '').slice(-6)}` : '', a.reason ?? '', <span className="mono">{String(a.correlation_id ?? '').slice(0, 8)}</span>])} /></Card>}
-    </>
-  );
-}
+const guard = (perm: string, el: React.ReactNode) => <Can perm={perm}>{el}</Can>;
 
 export default function Admin() {
   return (
     <Routes>
-      <Route index element={<Overview />} />
-      <Route path="tenants" element={<Tenants />} />
-      <Route path="tenants/:tenantId" element={<TenantDetail />} />
-      <Route path="access" element={<Access />} />
-      <Route path="jobs" element={<Jobs />} />
-      <Route path="abuse" element={<Abuse />} />
-      <Route path="support" element={<SupportQueue />} />
-      <Route path="users" element={<Users />} />
-      <Route path="settings" element={<Settings />} />
-      <Route path="audit" element={<Audit />} />
+      <Route index element={guard('dashboard.read', <Dashboard />)} />
+      <Route path="tenants" element={guard('tenants.read', <Tenants />)} />
+      <Route path="tenants/:tenantId" element={guard('tenants.read', <TenantDetail />)} />
+      <Route path="domains" element={guard('domains.read', <Domains />)} />
+      <Route path="users" element={guard('users.read', <Users />)} />
+      <Route path="users/new" element={guard('users.create', <CreateUser />)} />
+      <Route path="users/:userId" element={guard('users.read', <UserDetail />)} />
+      <Route path="invitations" element={guard('users.read', <Invitations />)} />
+      <Route path="mailboxes" element={guard('mailboxes.read', <Mailboxes />)} />
+      <Route path="mailboxes/new" element={guard('mailboxes.create', <CreateMailbox />)} />
+      <Route path="mailboxes/:mailboxId" element={guard('mailboxes.read', <MailboxDetail />)} />
+      <Route path="access" element={guard('mailbox_access.request', <Access />)} />
+      <Route path="jobs" element={guard('provisioning.read', <Jobs />)} />
+      <Route path="notifications" element={guard('notifications.read', <Notifications />)} />
+      <Route path="abuse" element={guard('abuse.read', <Abuse />)} />
+      <Route path="support" element={guard('support.read', <SupportQueue />)} />
+      <Route path="roles" element={guard('roles.read', <Roles />)} />
+      <Route path="roles/new" element={guard('roles.create', <RoleEditor />)} />
+      <Route path="roles/:roleId" element={guard('roles.read', <RoleEditor />)} />
+      <Route path="admins" element={guard('admins.manage', <Admins />)} />
+      <Route path="plans" element={guard('plans.read', <Plans />)} />
+      <Route path="settings" element={guard('settings.read', <Settings />)} />
+      <Route path="audit" element={guard('audit.read', <AuditLog />)} />
       <Route path="*" element={<Navigate to="/admin" replace />} />
     </Routes>
   );

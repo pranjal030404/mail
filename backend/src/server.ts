@@ -1,10 +1,13 @@
 import { buildApp } from './app.js';
 import { createAppContext } from './bootstrap.js';
 import { loadConfig } from './config/env.js';
+import { syncPermissionCatalog } from './modules/rbac/rbac.service.js';
 
 const config = loadConfig();
 const bootLog = { info: console.log, warn: console.warn, error: console.error, debug: () => undefined };
 const ctx = createAppContext(bootLog, config);
+// Align the permission catalog and built-in roles with this build before serving requests.
+await syncPermissionCatalog(ctx.db);
 const app = await buildApp(ctx);
 ctx.log = app.log;
 

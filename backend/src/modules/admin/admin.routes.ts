@@ -5,13 +5,14 @@ import { exec, one, rows } from '../../db/pool.js';
 import { AppError, notFound, parse } from '../../shared/errors.js';
 import { randomToken, sha256Hex } from '../../shared/crypto.js';
 import { newId } from '../../shared/ids.js';
-import { requirePlatform } from '../../plugins/session.js';
+import { requirePermission } from '../../plugins/session.js';
 import { audit } from '../audit/audit.service.js';
 import { revokeAllSessions } from '../auth/auth.service.js';
 import { cancelJob, queueDepth, requeue, enqueue } from '../jobs/jobs.repository.js';
 import { reconcileDomain } from '../mail-server/reconciliation.service.js';
 import { reactivateMailbox, suspendMailbox } from '../mailboxes/mailboxes.service.js';
 import { templates } from '../notifications/templates.js';
+import { activeSuperAdminCount, loadAdminAuthority } from '../rbac/rbac.service.js';
 import { getSettings, SettingsSchema, updateSettings } from '../settings/settings.service.js';
 import { getTenantUsage } from '../usage/usage.service.js';
 
@@ -24,7 +25,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
     audit(ctx.db, { actorType: 'platform_admin', actorAdminId, tenantId, action, targetType, targetId, outcome: 'success', ...(reason ? { reason } : {}), correlationId: req.meta.correlationId, ip: req.meta.ip, ...(metadata ? { metadata } : {}) });
 
   app.get('/admin/metrics', async (req) => {
-    requirePlatform(ctx, req, 'admin.read');
+    requirePermission(ctx, req, 'dashboard.read');
     const one1 = async <T>(sql: string) => (await one<T>(ctx.db, sql))!;
     const c = await one1<Record<string, number | string>>(`SELECT
       (SELECT COUNT(*) FROM tenants WHERE status = 'active') AS tenants_active,
@@ -62,7 +63,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
   });
 
   app.get('/admin/tenants', async (req) => {
-    requirePlatform(ctx, req, 'admin.read');
+    requirePermission(ctx, req, 'tenants.read');
     const q = parse(z.object({ q: z.string().max(100).optional(), status: z.enum(['active', 'suspended', 'closed']).optional(), page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(25) }), req.query);
     const where: string[] = ['1=1'];
     const params: unknown[] = [];
@@ -87,7 +88,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
   });
 
   app.get('/admin/tenants/:tenantId', async (req) => {
-    requirePlatform(ctx, req, 'admin.read');
+    requirePermission(ctx, req, 'tenants.read');
     const { tenantId } = parse(z.object({ tenantId: id }), req.params);
     const t = await one<{ id: string; name: string; slug: string; status: string; suspended_reason: string | null; plan_code: string; created_at: Date }>(ctx.db, 'SELECT t.id, t.name, t.slug, t.status, t.suspended_reason, t.created_at, p.code AS plan_code FROM tenants t JOIN plans p ON p.id = t.plan_id WHERE t.id = ?', [tenantId]);
     if (!t) throw notFound('Tenant');
@@ -100,7 +101,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
   });
 
   app.post('/admin/tenants/:tenantId/suspend', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.tenants.manage');
+    const a = requirePermission(ctx, req, 'tenants.suspend');
     const { tenantId } = parse(z.object({ tenantId: id }), req.params);
     const body = parse(Sensitive, req.body);
     const res = await exec(ctx.db, "UPDATE tenants SET status = 'suspended', suspended_reason = ?, suspended_at = NOW(3) WHERE id = ? AND status = 'active'", [body.reason, tenantId]);
@@ -116,7 +117,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
   });
 
   app.post('/admin/tenants/:tenantId/reactivate', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.tenants.manage');
+    const a = requirePermission(ctx, req, 'tenants.suspend');
     const { tenantId } = parse(z.object({ tenantId: id }), req.params);
     const body = parse(Sensitive, req.body);
     const res = await exec(ctx.db, "UPDATE tenants SET status = 'active', suspended_reason = NULL, suspended_at = NULL WHERE id = ? AND status = 'suspended'", [tenantId]);
@@ -131,7 +132,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
   });
 
   app.patch('/admin/tenants/:tenantId/quotas', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.plans.manage');
+    const a = requirePermission(ctx, req, 'plans.update');
     const { tenantId } = parse(z.object({ tenantId: id }), req.params);
     const body = parse(
       Sensitive.extend({
@@ -165,7 +166,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
   }
 
   app.post('/admin/mailboxes/:mailboxId/suspend', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.mailboxes.manage');
+    const a = requirePermission(ctx, req, 'mailboxes.suspend');
     const { mailboxId } = parse(z.object({ mailboxId: id }), req.params);
     const body = parse(Sensitive, req.body);
     const tenantId = await mailboxTenant(mailboxId);
@@ -173,7 +174,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
   });
 
   app.post('/admin/mailboxes/:mailboxId/reactivate', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.mailboxes.manage');
+    const a = requirePermission(ctx, req, 'mailboxes.suspend');
     const { mailboxId } = parse(z.object({ mailboxId: id }), req.params);
     const body = parse(Sensitive, req.body);
     const tenantId = await mailboxTenant(mailboxId);
@@ -184,7 +185,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
 
   // ---- provisioning
   app.get('/admin/provisioning-jobs', async (req) => {
-    requirePlatform(ctx, req, 'admin.read');
+    requirePermission(ctx, req, 'provisioning.read');
     const q = parse(z.object({ status: z.string().max(30).optional(), page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(100).default(50) }), req.query);
     const list = await rows(
       ctx.db,
@@ -197,7 +198,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
 
   for (const action of ['retry', 'cancel'] as const) {
     app.post(`/admin/provisioning-jobs/:jobId/${action}`, async (req) => {
-      const a = requirePlatform(ctx, req, 'admin.jobs.manage');
+      const a = requirePermission(ctx, req, 'provisioning.retry');
       const { jobId } = parse(z.object({ jobId: id }), req.params);
       const body = parse(Sensitive, req.body);
       const job = await one<{ tenant_id: string | null }>(ctx.db, 'SELECT tenant_id FROM provisioning_jobs WHERE id = ?', [jobId]);
@@ -210,7 +211,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
   }
 
   app.post('/admin/domains/:domainId/reconcile', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.jobs.manage');
+    const a = requirePermission(ctx, req, 'provisioning.retry');
     const { domainId } = parse(z.object({ domainId: id }), req.params);
     const body = parse(z.object({ repair: z.boolean().default(false), reason: z.string().trim().min(5).max(500) }), req.body);
     const drift = await reconcileDomain(ctx, domainId, { repair: body.repair });
@@ -220,13 +221,13 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
 
   // ---- abuse
   app.get('/admin/abuse-reports', async (req) => {
-    requirePlatform(ctx, req, 'admin.abuse.manage');
+    requirePermission(ctx, req, 'abuse.read');
     const { status } = parse(z.object({ status: z.enum(['open', 'investigating', 'actioned', 'dismissed', 'closed']).optional() }), req.query);
     return { reports: await rows(ctx.db, `SELECT id, tenant_id, mailbox_id, reported_address, category, severity, status, source, summary, investigation_notes, created_at, resolved_at FROM abuse_reports ${status ? 'WHERE status = ?' : ''} ORDER BY FIELD(severity,'critical','high','medium','low'), created_at DESC LIMIT 200`, status ? [status] : []) };
   });
 
   app.patch('/admin/abuse-reports/:reportId', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.abuse.manage');
+    const a = requirePermission(ctx, req, 'abuse.manage');
     const { reportId } = parse(z.object({ reportId: id }), req.params);
     const body = parse(z.object({ status: z.enum(['open', 'investigating', 'actioned', 'dismissed', 'closed']), severity: z.enum(['low', 'medium', 'high', 'critical']).optional(), notes: z.string().trim().max(3000).optional(), reason: z.string().trim().min(5).max(500) }), req.body);
     const r = await one<{ tenant_id: string | null }>(ctx.db, 'SELECT tenant_id FROM abuse_reports WHERE id = ?', [reportId]);
@@ -237,44 +238,15 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
   });
 
   // ---- users and sign-up
-  app.post('/admin/users/:userId/revoke-sessions', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.users.manage');
-    const { userId } = parse(z.object({ userId: id }), req.params);
-    const body = parse(Sensitive, req.body);
-    const n = await revokeAllSessions(ctx, userId, 'admin_revoked');
-    await platformAudit(req, a.user.id, 'admin.user.revoke_sessions', null, 'user', userId, body.reason, { revoked: n });
-    return { revoked: n };
-  });
-
-  app.post('/admin/users/:userId/suspend', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.users.manage');
-    const { userId } = parse(z.object({ userId: id }), req.params);
-    const body = parse(Sensitive, req.body);
-    if (userId === a.user.id) throw new AppError(409, 'invalid_target', 'You cannot suspend yourself.');
-    const res = await exec(ctx.db, "UPDATE users SET status = 'suspended', suspended_reason = ? WHERE id = ? AND status = 'active'", [body.reason, userId]);
-    if (res.affectedRows !== 1) throw new AppError(409, 'invalid_state', 'The user is not active.');
-    await revokeAllSessions(ctx, userId, 'user_suspended');
-    await platformAudit(req, a.user.id, 'admin.user.suspend', null, 'user', userId, body.reason);
-    return { ok: true };
-  });
-
-  app.get('/admin/users', async (req) => {
-    requirePlatform(ctx, req, 'admin.users.manage');
-    const { q } = parse(z.object({ q: z.string().max(100).optional() }), req.query);
-    const list = await rows<{ id: string; email: string; display_name: string; status: string; mfa_enabled: number; last_login_at: Date | null; created_at: Date }>(ctx.db, `SELECT id, login_email AS email, display_name, status, mfa_enabled, last_login_at, created_at FROM users ${q ? 'WHERE login_email LIKE ?' : ''} ORDER BY created_at DESC LIMIT 50`, q ? [`%${q.replace(/[%_\\]/g, '\\$&')}%`] : []);
-    // Customer rows never carry a platform role; admins are returned by /admin/admins.
-    return { users: list.map((u) => ({ ...u, platform_role: 'none' })) };
-  });
-
   // ---- platform administrators (separate principal/table from customers)
   app.get('/admin/admins', async (req) => {
-    requirePlatform(ctx, req, 'admin.users.manage');
-    const list = await rows(ctx.db, 'SELECT id, login_email AS email, display_name, role AS platform_role, status, mfa_enabled, last_login_at, created_at FROM platform_admins ORDER BY created_at DESC');
+    requirePermission(ctx, req, 'admins.manage');
+    const list = await rows(ctx.db, "SELECT a.id, a.login_email AS email, a.display_name, a.role AS platform_role, r.id AS role_id, r.role_key, r.name AS role_name, a.status, a.mfa_enabled, a.last_login_at, a.created_at FROM platform_admins a LEFT JOIN rbac_roles r ON r.id = COALESCE(a.role_id, (SELECT x.id FROM rbac_roles x WHERE x.role_key = a.role)) ORDER BY a.created_at DESC");
     return { admins: list };
   });
 
   app.post('/admin/admins/:adminId/revoke-sessions', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.users.manage');
+    const a = requirePermission(ctx, req, 'admins.manage');
     const { adminId } = parse(z.object({ adminId: id }), req.params);
     const body = parse(Sensitive, req.body);
     if (!(await one(ctx.db, 'SELECT id FROM platform_admins WHERE id = ?', [adminId]))) throw notFound('Administrator');
@@ -284,10 +256,12 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
   });
 
   app.post('/admin/admins/:adminId/suspend', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.users.manage');
+    const a = requirePermission(ctx, req, 'admins.manage');
     const { adminId } = parse(z.object({ adminId: id }), req.params);
     const body = parse(Sensitive, req.body);
     if (adminId === a.user.id) throw new AppError(409, 'invalid_target', 'You cannot suspend yourself.');
+    const target = await loadAdminAuthority(ctx.db, adminId);
+    if (target.roleKey === 'super_admin' && (await activeSuperAdminCount(ctx.db, adminId)) === 0) throw new AppError(409, 'last_super_admin', 'At least one active Super Administrator must remain.');
     const res = await exec(ctx.db, "UPDATE platform_admins SET status = 'suspended', suspended_reason = ? WHERE id = ? AND status = 'active'", [body.reason, adminId]);
     if (res.affectedRows !== 1) throw new AppError(409, 'invalid_state', 'The administrator is not active.');
     await revokeAllSessions(ctx, adminId, 'admin_suspended', undefined, 'platform_admin');
@@ -296,7 +270,7 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
   });
 
   app.post('/admin/signup-invitations', async (req, reply) => {
-    const a = requirePlatform(ctx, req, 'admin.users.manage');
+    const a = requirePermission(ctx, req, 'users.create');
     const body = parse(z.object({ email: z.string().trim().max(254).pipe(z.email()) }), req.body);
     const email = body.email.toLowerCase();
     const token = randomToken();
@@ -309,12 +283,12 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
 
   // ---- settings, plans
   app.get('/admin/settings', async (req) => {
-    requirePlatform(ctx, req, 'admin.read');
+    requirePermission(ctx, req, 'settings.read');
     return getSettings(ctx.db);
   });
 
   app.patch('/admin/settings', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.settings.manage');
+    const a = requirePermission(ctx, req, 'settings.update');
     const body = parse(Sensitive.extend({ settings: SettingsSchema.partial() }), req.body);
     await updateSettings(ctx.db, body.settings, a.user.id);
     await platformAudit(req, a.user.id, 'admin.settings.update', null, 'settings', null, body.reason, { keys: Object.keys(body.settings) });
@@ -322,38 +296,34 @@ export async function adminRoutes(app: FastifyInstance, ctx: AppContext): Promis
   });
 
   app.get('/admin/plans', async (req) => {
-    requirePlatform(ctx, req, 'admin.read');
+    requirePermission(ctx, req, 'plans.read');
     return { plans: await rows(ctx.db, 'SELECT * FROM plans ORDER BY name') };
   });
 
   app.get('/admin/audit', async (req) => {
-    requirePlatform(ctx, req, 'admin.read');
-    const q = parse(z.object({ tenantId: id.optional(), action: z.string().max(100).optional(), actorUserId: id.optional(), page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(200).default(50) }), req.query);
+    requirePermission(ctx, req, 'audit.read');
+    const q = parse(z.object({ tenantId: id.optional(), action: z.string().max(100).optional(), actorUserId: id.optional(), outcome: z.enum(['success', 'failure', 'denied']).optional(), targetId: z.string().max(40).optional(), from: z.string().max(40).optional(), to: z.string().max(40).optional(), page: z.coerce.number().int().min(1).default(1), pageSize: z.coerce.number().int().min(1).max(200).default(50) }), req.query);
     const where: string[] = ['1=1'];
     const params: unknown[] = [];
-    if (q.tenantId) {
-      where.push('tenant_id = ?');
-      params.push(q.tenantId);
-    }
-    if (q.action) {
-      where.push('action LIKE ?');
-      params.push(`${q.action}%`);
-    }
-    if (q.actorUserId) {
-      where.push('(actor_user_id = ? OR actor_admin_id = ?)');
-      params.push(q.actorUserId, q.actorUserId);
-    }
-    return { entries: await rows(ctx.db, `SELECT id, occurred_at, actor_type, actor_user_id, actor_admin_id, tenant_id, action, target_type, target_id, outcome, reason, correlation_id, ip FROM audit_logs WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ? OFFSET ?`, [...params, q.pageSize, (q.page - 1) * q.pageSize]) };
+    if (q.tenantId) { where.push('tenant_id = ?'); params.push(q.tenantId); }
+    if (q.action) { where.push('action LIKE ?'); params.push(`${q.action.replace(/[%_\\]/g, '\\$&')}%`); }
+    if (q.actorUserId) { where.push('(actor_user_id = ? OR actor_admin_id = ?)'); params.push(q.actorUserId, q.actorUserId); }
+    if (q.outcome) { where.push('outcome = ?'); params.push(q.outcome); }
+    if (q.targetId) { where.push('target_id = ?'); params.push(q.targetId); }
+    if (q.from) { where.push('occurred_at >= ?'); params.push(new Date(q.from)); }
+    if (q.to) { where.push('occurred_at < ?'); params.push(new Date(q.to)); }
+    const total = await one<{ n: number }>(ctx.db, `SELECT COUNT(*) AS n FROM audit_logs WHERE ${where.join(' AND ')}`, params);
+    return { total: Number(total?.n ?? 0), entries: await rows(ctx.db, `SELECT id, occurred_at, actor_type, actor_user_id, actor_admin_id, tenant_id, action, target_type, target_id, outcome, reason, correlation_id, ip FROM audit_logs WHERE ${where.join(' AND ')} ORDER BY id DESC LIMIT ? OFFSET ?`, [...params, q.pageSize, (q.page - 1) * q.pageSize]) };
   });
 
   // ---- support (metadata + customer-written text only)
   app.get('/admin/support-tickets', async (req) => {
-    requirePlatform(ctx, req, 'admin.read');
+    requirePermission(ctx, req, 'support.read');
     return { tickets: await rows(ctx.db, "SELECT id, tenant_id, category, urgency, subject, status, created_at, updated_at FROM support_tickets WHERE status <> 'closed' ORDER BY FIELD(urgency,'urgent','high','normal','low'), updated_at DESC LIMIT 100") };
   });
 
   app.post('/admin/support-tickets/:ticketId/reply', async (req) => {
-    const a = requirePlatform(ctx, req, 'admin.users.manage');
+    const a = requirePermission(ctx, req, 'support.respond');
     const { ticketId } = parse(z.object({ ticketId: id }), req.params);
     const body = parse(z.object({ message: z.string().trim().min(1).max(5000), status: z.enum(['awaiting_customer', 'resolved', 'closed']).default('awaiting_customer') }), req.body);
     const t = await one<{ tenant_id: string }>(ctx.db, 'SELECT tenant_id FROM support_tickets WHERE id = ?', [ticketId]);

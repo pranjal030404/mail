@@ -8,6 +8,8 @@ export interface OutgoingMessage {
   to: string;
   subject: string;
   text: string;
+  /** Optional HTML alternative; the text part is always present. */
+  html?: string | undefined;
   /** Category used for logging; message content is never logged. */
   category: string;
 }
@@ -15,6 +17,8 @@ export interface OutgoingMessage {
 export interface Mailer {
   readonly kind: 'smtp' | 'dev' | 'memory';
   send(msg: OutgoingMessage): Promise<void>;
+  /** Checks connectivity/authentication without sending. Rejects with a secret-free message on failure. */
+  verify(): Promise<void>;
 }
 
 /** Sends platform notifications through an authenticated SMTP submission account. */
@@ -36,7 +40,11 @@ export class SmtpMailer implements Mailer {
   }
 
   async send(msg: OutgoingMessage): Promise<void> {
-    await this.transport.sendMail({ from: this.config.MAIL_FROM, to: msg.to, subject: msg.subject, text: msg.text });
+    await this.transport.sendMail({ from: this.config.MAIL_FROM, to: msg.to, subject: msg.subject, text: msg.text, ...(msg.html ? { html: msg.html } : {}) });
+  }
+
+  async verify(): Promise<void> {
+    await this.transport.verify();
   }
 }
 
@@ -59,11 +67,15 @@ export class DevFileMailer implements Mailer {
       `From: ${this.from}`,
       `To: ${msg.to}`,
       `Subject: ${msg.subject}`,
-      'Content-Type: text/plain; charset=utf-8',
-      '',
-      msg.text,
+      ...(msg.html
+        ? ['MIME-Version: 1.0', 'Content-Type: multipart/alternative; boundary="arthvex-dev"', '', '--arthvex-dev', 'Content-Type: text/plain; charset=utf-8', '', msg.text, '--arthvex-dev', 'Content-Type: text/html; charset=utf-8', '', msg.html, '--arthvex-dev--']
+        : ['Content-Type: text/plain; charset=utf-8', '', msg.text]),
     ].join('\r\n');
     await writeFile(file, body, { mode: 0o600 });
+  }
+
+  async verify(): Promise<void> {
+    await mkdir(this.dir, { recursive: true });
   }
 }
 
@@ -71,7 +83,16 @@ export class DevFileMailer implements Mailer {
 export class MemoryMailer implements Mailer {
   readonly kind = 'memory' as const;
   readonly sent: OutgoingMessage[] = [];
+  /** Tests set this to simulate a provider outage; it is consumed one failure at a time. */
+  failNext = 0;
+  async verify(): Promise<void> {
+    if (this.failNext > 0) throw new Error('SMTP unavailable');
+  }
   async send(msg: OutgoingMessage): Promise<void> {
+    if (this.failNext > 0) {
+      this.failNext--;
+      throw new Error('SMTP unavailable');
+    }
     this.sent.push(msg);
   }
   last(to: string, category?: string): OutgoingMessage | undefined {

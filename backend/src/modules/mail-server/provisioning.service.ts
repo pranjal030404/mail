@@ -1,3 +1,4 @@
+import { afterMailboxActive } from '../invitations/invitations.service.js';
 import type { AppContext } from '../../context.js';
 import { exec, one, rows } from '../../db/pool.js';
 import { audit } from '../audit/audit.service.js';
@@ -82,6 +83,8 @@ const handlers: Record<string, (ctx: AppContext, job: JobRow) => Promise<Record<
     });
     if (account.quotaBytes !== null && account.quotaBytes !== Number(m.quota_bytes)) await ctx.mail.updateMailboxQuota(account.engineId, Number(m.quota_bytes));
     await exec(ctx.db, "UPDATE mailboxes SET mail_engine_account_id = ?, status = 'active', used_bytes = ?, usage_collected_at = NOW(3) WHERE id = ? AND status = 'provisioning'", [account.engineId, account.usedBytes, m.id]);
+    // Onboarding mail is best effort: a notification problem must never fail or retry provisioning.
+    await afterMailboxActive(ctx, m.id).catch((e) => ctx.log.warn({ err: (e as Error).message }, 'mailbox instructions not queued'));
     return { engineId: account.engineId };
   },
 

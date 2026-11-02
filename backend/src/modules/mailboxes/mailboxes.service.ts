@@ -5,7 +5,7 @@ import { AppError, badRequest, conflict, notFound, unprocessable } from '../../s
 import { generateMailboxPassword } from '../../shared/crypto.js';
 import { newId } from '../../shared/ids.js';
 import { audit } from '../audit/audit.service.js';
-import { auditActor, type AuthUser, type RequestMeta } from '../auth/auth.service.js';
+import { auditActor, type AuthUser, type PrincipalKind, type RequestMeta } from '../auth/auth.service.js';
 import { assertDomainAcceptsMailboxes, loadDomain, tenantUsageCounts } from '../domains/domains.service.js';
 import { enqueue } from '../jobs/jobs.repository.js';
 import { MailServerError } from '../mail-server/mail-server.interface.js';
@@ -55,7 +55,7 @@ export async function loadMailbox(ctx: AppContext, tenantId: string, mailboxId: 
   return m;
 }
 
-export async function createMailbox(ctx: AppContext, tenantId: string, domainId: string, actorId: string, input: { localPart: string; displayName?: string | undefined; quotaBytes?: number | undefined }, meta: RequestMeta) {
+export async function createMailbox(ctx: AppContext, tenantId: string, domainId: string, actorId: string, input: { localPart: string; displayName?: string | undefined; quotaBytes?: number | undefined }, meta: RequestMeta, actorKind: PrincipalKind = 'user') {
   const domain = await loadDomain(ctx, tenantId, domainId);
   await assertDomainAcceptsMailboxes(ctx, domain);
   let localPart: string;
@@ -84,7 +84,7 @@ export async function createMailbox(ctx: AppContext, tenantId: string, domainId:
         [id, tenantId, domainId, localPart, address, address, input.displayName?.trim() || null, quota, actorId],
       );
       await enqueue(conn, { tenantId, operation: 'mailbox.create', targetType: 'mailbox', targetId: id, idempotencyKey: `mailbox.create:${id}`, createdBy: actorId });
-      await audit(conn, { actorType: 'user', actorUserId: actorId, tenantId, action: 'mailbox.create', targetType: 'mailbox', targetId: id, outcome: 'success', correlationId: meta.correlationId, ip: meta.ip, metadata: { address } });
+      await audit(conn, { ...auditActor({ id: actorId, kind: actorKind }), tenantId, action: 'mailbox.create', targetType: 'mailbox', targetId: id, outcome: 'success', correlationId: meta.correlationId, ip: meta.ip, metadata: { address } });
     });
   } catch (err) {
     if (isDuplicateKey(err)) throw conflict('address_taken', 'That address is already in use.');
@@ -153,7 +153,7 @@ export async function reactivateMailbox(ctx: AppContext, tenantId: string, mailb
   return present(await loadMailbox(ctx, tenantId, mailboxId));
 }
 
-export async function scheduleDeletion(ctx: AppContext, tenantId: string, mailboxId: string, confirmAddress: string, actorId: string, meta: RequestMeta) {
+export async function scheduleDeletion(ctx: AppContext, tenantId: string, mailboxId: string, confirmAddress: string, actorId: string, meta: RequestMeta, actorKind: PrincipalKind = 'user') {
   const m = await loadMailbox(ctx, tenantId, mailboxId);
   if (confirmAddress.trim().toLowerCase() !== m.normalized_address) throw badRequest('confirmation_mismatch', 'Type the full mailbox address to confirm deletion.');
   const { mailbox_deletion_grace_days: days } = await getSettings(ctx.db);
@@ -165,21 +165,21 @@ export async function scheduleDeletion(ctx: AppContext, tenantId: string, mailbo
     // Access stops immediately; data is removed after the grace period.
     await enqueue(ctx.db, { tenantId, operation: 'mailbox.suspend', targetType: 'mailbox', targetId: mailboxId, idempotencyKey: `mailbox.suspend:${mailboxId}:${newId()}`, createdBy: actorId });
   }
-  await audit(ctx.db, { actorType: 'user', actorUserId: actorId, tenantId, action: 'mailbox.schedule_deletion', targetType: 'mailbox', targetId: mailboxId, outcome: 'success', correlationId: meta.correlationId, ip: meta.ip, metadata: { graceDays: days } });
+  await audit(ctx.db, { ...auditActor({ id: actorId, kind: actorKind }), tenantId, action: 'mailbox.schedule_deletion', targetType: 'mailbox', targetId: mailboxId, outcome: 'success', correlationId: meta.correlationId, ip: meta.ip, metadata: { graceDays: days } });
   return { ok: true, graceDays: days };
 }
 
-export async function cancelDeletion(ctx: AppContext, tenantId: string, mailboxId: string, actorId: string, meta: RequestMeta) {
+export async function cancelDeletion(ctx: AppContext, tenantId: string, mailboxId: string, actorId: string, meta: RequestMeta, actorKind: PrincipalKind = 'user') {
   const m = await loadMailbox(ctx, tenantId, mailboxId);
   if (m.status !== 'deletion_scheduled') throw new AppError(409, 'invalid_state', 'This mailbox is not scheduled for deletion.');
   const back = m.status_before_deletion ?? 'active';
   await transition(ctx, m, back, ', status_before_deletion = NULL, deletion_scheduled_for = NULL', []);
   if (back === 'active') await enqueue(ctx.db, { tenantId, operation: 'mailbox.reactivate', targetType: 'mailbox', targetId: mailboxId, idempotencyKey: `mailbox.reactivate:${mailboxId}:${newId()}`, createdBy: actorId });
-  await audit(ctx.db, { actorType: 'user', actorUserId: actorId, tenantId, action: 'mailbox.cancel_deletion', targetType: 'mailbox', targetId: mailboxId, outcome: 'success', correlationId: meta.correlationId, ip: meta.ip });
+  await audit(ctx.db, { ...auditActor({ id: actorId, kind: actorKind }), tenantId, action: 'mailbox.cancel_deletion', targetType: 'mailbox', targetId: mailboxId, outcome: 'success', correlationId: meta.correlationId, ip: meta.ip });
   return present(await loadMailbox(ctx, tenantId, mailboxId));
 }
 
-export async function updateMailbox(ctx: AppContext, tenantId: string, mailboxId: string, patch: { displayName?: string | undefined; quotaBytes?: number | undefined }, actorId: string, meta: RequestMeta) {
+export async function updateMailbox(ctx: AppContext, tenantId: string, mailboxId: string, patch: { displayName?: string | undefined; quotaBytes?: number | undefined }, actorId: string, meta: RequestMeta, actorKind: PrincipalKind = 'user') {
   const m = await loadMailbox(ctx, tenantId, mailboxId);
   if (patch.displayName !== undefined) await exec(ctx.db, 'UPDATE mailboxes SET display_name = ? WHERE id = ?', [patch.displayName.trim() || null, mailboxId]);
   if (patch.quotaBytes !== undefined && patch.quotaBytes !== Number(m.quota_bytes)) {
@@ -192,7 +192,7 @@ export async function updateMailbox(ctx: AppContext, tenantId: string, mailboxId
     await exec(ctx.db, 'UPDATE mailboxes SET quota_bytes = ? WHERE id = ?', [patch.quotaBytes, mailboxId]);
     await enqueue(ctx.db, { tenantId, operation: 'mailbox.quota', targetType: 'mailbox', targetId: mailboxId, idempotencyKey: `mailbox.quota:${mailboxId}:${newId()}`, createdBy: actorId });
   }
-  await audit(ctx.db, { actorType: 'user', actorUserId: actorId, tenantId, action: 'mailbox.update', targetType: 'mailbox', targetId: mailboxId, outcome: 'success', correlationId: meta.correlationId, ip: meta.ip });
+  await audit(ctx.db, { ...auditActor({ id: actorId, kind: actorKind }), tenantId, action: 'mailbox.update', targetType: 'mailbox', targetId: mailboxId, outcome: 'success', correlationId: meta.correlationId, ip: meta.ip });
   return present(await loadMailbox(ctx, tenantId, mailboxId));
 }
 
@@ -200,7 +200,7 @@ export async function updateMailbox(ctx: AppContext, tenantId: string, mailboxId
  * Sets the mailbox password through the adapter. The password exists only in this call:
  * it is never written to the database, a job payload or a log. A generated password is returned once.
  */
-export async function resetCredentials(ctx: AppContext, tenantId: string, mailboxId: string, requested: string | undefined, actorId: string, meta: RequestMeta) {
+export async function resetCredentials(ctx: AppContext, tenantId: string, mailboxId: string, requested: string | undefined, actorId: string, meta: RequestMeta, actorKind: PrincipalKind = 'user') {
   const m = await loadMailbox(ctx, tenantId, mailboxId);
   if (!m.mail_engine_account_id || (m.status !== 'active' && m.status !== 'suspended')) throw new AppError(409, 'invalid_state', 'Credentials can be set once the mailbox is active.');
   if (requested !== undefined) {
@@ -212,11 +212,11 @@ export async function resetCredentials(ctx: AppContext, tenantId: string, mailbo
     await ctx.mail.setMailboxPassword(m.mail_engine_account_id, password);
   } catch (err) {
     ctx.log.warn({ kind: (err as MailServerError).kind, mailboxId }, 'set mailbox password failed');
-    await audit(ctx.db, { actorType: 'user', actorUserId: actorId, tenantId, action: 'mailbox.reset_credentials', targetType: 'mailbox', targetId: mailboxId, outcome: 'failure', correlationId: meta.correlationId, ip: meta.ip });
+    await audit(ctx.db, { ...auditActor({ id: actorId, kind: actorKind }), tenantId, action: 'mailbox.reset_credentials', targetType: 'mailbox', targetId: mailboxId, outcome: 'failure', correlationId: meta.correlationId, ip: meta.ip });
     throw new AppError(503, 'mail_service_unavailable', 'The mail service could not update the password right now. Try again shortly.');
   }
   await exec(ctx.db, 'UPDATE mailboxes SET credentials_set_at = NOW(3) WHERE id = ?', [mailboxId]);
-  await audit(ctx.db, { actorType: 'user', actorUserId: actorId, tenantId, action: 'mailbox.reset_credentials', targetType: 'mailbox', targetId: mailboxId, outcome: 'success', correlationId: meta.correlationId, ip: meta.ip });
+  await audit(ctx.db, { ...auditActor({ id: actorId, kind: actorKind }), tenantId, action: 'mailbox.reset_credentials', targetType: 'mailbox', targetId: mailboxId, outcome: 'success', correlationId: meta.correlationId, ip: meta.ip });
   return requested === undefined ? { generatedPassword: password } : { ok: true };
 }
 

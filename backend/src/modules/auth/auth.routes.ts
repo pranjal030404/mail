@@ -51,6 +51,11 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext): Promise
   app.post('/auth/login', { config: limit(ctx, 10) }, async (req, reply) => {
     const body = parse(z.object({ email, password }), req.body);
     const result = await auth.login(ctx, body.email, body.password, req.meta);
+    const native = req.headers['x-client'] === 'mobile';
+    if (native) {
+      // Native apps keep the opaque session token in secure storage and send it as a Bearer header.
+      return { mfaRequired: result.session.mfaRequired, token: result.token, expiresAt: result.session.expiresAt };
+    }
     setSessionCookie(ctx, reply, result.token, result.session.expiresAt);
     return { mfaRequired: result.session.mfaRequired, csrfToken: auth.csrfTokenFor(ctx, result.session.id) };
   });
@@ -136,7 +141,7 @@ export async function authRoutes(app: FastifyInstance, ctx: AppContext): Promise
     const base = {
       csrfToken,
       mfaPending,
-      user: { id: user.id, email: user.login_email, displayName: user.display_name, mfaEnabled: Boolean(user.mfa_enabled), platformRole: user.platform_role, timezone: user.timezone, locale: user.locale },
+      user: { id: user.id, email: user.login_email, displayName: user.display_name, mfaEnabled: Boolean(user.mfa_enabled), platformRole: user.platform_role, roleKey: user.role_key ?? null, permissions: [...(user.permissions ?? [])].sort(), timezone: user.timezone, locale: user.locale },
     };
     if (mfaPending) return { ...base, memberships: [], mfaSetupRequired: false };
     const isPlatformAdmin = user.kind === 'platform_admin';

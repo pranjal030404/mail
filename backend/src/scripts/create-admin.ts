@@ -6,7 +6,7 @@ import { newId } from '../shared/ids.js';
 import { passwordProblem } from '../core/index.js';
 
 /**
- * Usage: npm run admin:create -- [email] ["Display Name"] [super_admin|operations]
+ * Usage: npm run admin:create -- [email] ["Display Name"] [super_admin|operations|support]
  *
  * Values fall back to ADMIN_EMAIL / ADMIN_NAME / ADMIN_ROLE / ADMIN_PASSWORD in the environment
  * (backend/.env), so the account can be provisioned non-interactively. The password is never
@@ -32,8 +32,8 @@ const [emailArg, nameArg, roleArg] = process.argv.slice(2);
 const email = (emailArg ?? process.env.ADMIN_EMAIL ?? '').trim().toLowerCase();
 const name = (nameArg ?? process.env.ADMIN_NAME ?? '').trim();
 const role = roleArg ?? process.env.ADMIN_ROLE ?? 'super_admin';
-if (!email || !name || !['super_admin', 'operations'].includes(role)) {
-  console.error('Usage: npm run admin:create -- <email> "<Display Name>" [super_admin|operations]');
+if (!email || !name || !['super_admin', 'operations', 'support'].includes(role)) {
+  console.error('Usage: npm run admin:create -- <email> "<Display Name>" [super_admin|operations|support]');
   console.error('   or set ADMIN_EMAIL, ADMIN_NAME and ADMIN_ROLE in .env.');
   process.exit(1);
 }
@@ -43,7 +43,7 @@ if (emailProblem) {
   process.exit(1);
 }
 const config = loadConfig();
-const password = process.env.ADMIN_PASSWORD ?? (await promptHidden('Password (min 12 chars): '));
+const password = process.env.ADMIN_PASSWORD || (await promptHidden('Password (min 12 chars): '));
 const problem = passwordProblem(password, { email });
 if (problem) {
   console.error(problem);
@@ -62,15 +62,15 @@ try {
   if (existing) {
     await exec(
       db,
-      "UPDATE platform_admins SET display_name = ?, role = ?, status = 'active', password_hash = ?, failed_login_count = 0, locked_until = NULL, suspended_reason = NULL WHERE id = ?",
-      [name, role, passwordHash, existing.id],
+      "UPDATE platform_admins SET display_name = ?, role = ?, role_id = (SELECT id FROM rbac_roles WHERE role_key = ?), status = 'active', password_hash = ?, failed_login_count = 0, locked_until = NULL, suspended_reason = NULL WHERE id = ?",
+      [name, role, role, passwordHash, existing.id],
     );
     console.log(`Updated ${role} ${email}. Password and status synchronised from ADMIN_PASSWORD.`);
   } else {
     await exec(
       db,
-      "INSERT INTO platform_admins (id, login_email, display_name, password_hash, role, status) VALUES (?, ?, ?, ?, ?, 'active')",
-      [newId(), email, name, passwordHash, role],
+      "INSERT INTO platform_admins (id, login_email, display_name, password_hash, role, role_id, status) VALUES (?, ?, ?, ?, ?, (SELECT id FROM rbac_roles WHERE role_key = ?), 'active')",
+      [newId(), email, name, passwordHash, role, role],
     );
     console.log(`Created ${role} ${email}. They must enrol two-factor authentication at first sign-in.`);
   }

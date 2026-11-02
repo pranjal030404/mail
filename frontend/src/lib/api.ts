@@ -16,7 +16,7 @@ export const setCsrfToken = (t: string) => {
   csrfToken = t;
 };
 
-export async function api<T = unknown>(method: 'GET' | 'POST' | 'PATCH' | 'DELETE', path: string, body?: unknown): Promise<T> {
+export async function api<T = unknown>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, body?: unknown): Promise<T> {
   let res: Response;
   try {
     res = await fetch(`/api/v1${path}`, {
@@ -44,6 +44,7 @@ export async function api<T = unknown>(method: 'GET' | 'POST' | 'PATCH' | 'DELET
 
 export const get = <T,>(p: string) => api<T>('GET', p);
 export const post = <T,>(p: string, b: unknown = {}) => api<T>('POST', p, b);
+export const put = <T,>(p: string, b: unknown = {}) => api<T>('PUT', p, b);
 export const patch = <T,>(p: string, b: unknown = {}) => api<T>('PATCH', p, b);
 export const del = <T,>(p: string, b?: unknown) => api<T>('DELETE', p, b);
 

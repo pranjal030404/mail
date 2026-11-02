@@ -1,7 +1,7 @@
 export const TENANT_ROLES = ['owner', 'admin', 'mailbox_user', 'billing'] as const;
 export type TenantRole = (typeof TENANT_ROLES)[number];
 
-export const PLATFORM_ROLES = ['none', 'operations', 'super_admin'] as const;
+export const PLATFORM_ROLES = ['none', 'operations', 'super_admin', 'support', 'custom'] as const;
 export type PlatformRole = (typeof PLATFORM_ROLES)[number];
 
 export const TENANT_ROLE_LABELS: Record<TenantRole, string> = {
@@ -84,6 +84,8 @@ const OPERATIONS_ACTIONS: PlatformAction[] = [
 
 export const PLATFORM_PERMISSIONS: Record<PlatformRole, ReadonlySet<PlatformAction>> = {
   none: new Set(),
+  support: new Set<PlatformAction>(['admin.read']),
+  custom: new Set(),
   operations: new Set(OPERATIONS_ACTIONS),
   super_admin: new Set<PlatformAction>([...OPERATIONS_ACTIONS, 'admin.plans.manage', 'admin.settings.manage', 'admin.roles.manage', 'admin.access.approve']),
 };

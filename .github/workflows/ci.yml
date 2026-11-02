@@ -24,21 +24,23 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Backend install, lint, typecheck, test
+        working-directory: backend
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm test
 
-      - name: Lint
-        run: npm run lint
-
-      - name: Typecheck
-        run: npm run typecheck
-
-      - name: Backend tests
-        run: npm test
-
-      - name: Frontend tests
-        run: npm run test:web
-
-      - name: Production build
-        run: npm run build
+      - name: Frontend install, lint, typecheck, test, build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run typecheck
+          npm test
+          npm run build

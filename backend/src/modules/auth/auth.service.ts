@@ -6,6 +6,7 @@ import { hmacHex, randomToken, safeEqual, sha256Hex } from '../../shared/crypto.
 import { newId } from '../../shared/ids.js';
 import { audit } from '../audit/audit.service.js';
 import { templates } from '../notifications/templates.js';
+import { loadAdminAuthority } from '../rbac/rbac.service.js';
 import { getSettings } from '../settings/settings.service.js';
 import { hashPassword, verifyPassword } from './password.js';
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp.js';
@@ -31,6 +32,9 @@ export interface AuthUser {
   password_hash: string;
   status: 'pending_verification' | 'active' | 'suspended' | 'closed';
   platform_role: PlatformRole;
+  /** Resolved platform permissions (admins only; loaded fresh for every request). */
+  permissions?: ReadonlySet<string>;
+  role_key?: string | null;
   email_verified_at: Date | null;
   mfa_enabled: number;
   timezone: string;
@@ -60,7 +64,8 @@ export interface AdminRecord {
   login_email: string;
   display_name: string;
   password_hash: string;
-  role: 'operations' | 'super_admin';
+  role: 'operations' | 'super_admin' | 'support' | 'custom';
+  role_id?: string | null;
   status: 'pending_verification' | 'active' | 'suspended' | 'closed';
   mfa_enabled: number;
   timezone: string;
@@ -177,7 +182,7 @@ export async function register(ctx: AppContext, input: RegisterInput, meta: Requ
   let inviteId: string | null = null;
   if (settings.signup_mode === 'closed') throw forbidden('signup_closed', 'Registration is currently closed.');
   if (settings.signup_mode === 'invite_only') {
-    if (!input.inviteToken) throw forbidden('invite_required', 'Registration is by invitation only during the private beta.');
+    if (!input.inviteToken) throw forbidden('invite_required', 'Registration is by invitation only.');
     const inv = await one<{ id: string; email: string }>(
       ctx.db,
       'SELECT id, email FROM signup_invitations WHERE token_hash = ? AND used_at IS NULL AND revoked_at IS NULL AND expires_at > NOW(3)',
@@ -332,7 +337,10 @@ export async function resolveSession(ctx: AppContext, token: string): Promise<{ 
   let user: AuthUser | null = null;
   if (s.admin_id) {
     const admin = await one<AdminRecord>(ctx.db, "SELECT * FROM platform_admins WHERE id = ? AND status = 'active'", [s.admin_id]);
-    if (admin) user = adminToPrincipal(admin);
+    if (admin) {
+      const authority = await loadAdminAuthority(ctx.db, admin.id);
+      user = { ...adminToPrincipal(admin), permissions: authority.permissions, role_key: authority.roleKey };
+    }
   } else if (s.user_id) {
     const record = await one<UserRecord>(ctx.db, "SELECT * FROM users WHERE id = ? AND status = 'active'", [s.user_id]);
     if (record) user = userToPrincipal(record);

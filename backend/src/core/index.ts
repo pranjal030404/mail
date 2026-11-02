@@ -6,3 +6,4 @@ export * from './entitlements.js';
 export * from './aliases.js';
 export * from './password.js';
 export * from './access-grant.js';
+export * from './permissions.js';

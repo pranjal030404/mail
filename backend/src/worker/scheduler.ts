@@ -6,6 +6,7 @@ import { reclaimExpired } from '../modules/jobs/jobs.repository.js';
 import { startDueDeletions } from '../modules/mail-server/provisioning.service.js';
 import { reconcileDomain } from '../modules/mail-server/reconciliation.service.js';
 import { notifyTenantAdmins } from '../modules/notifications/notifications.service.js';
+import { processOutbox } from '../modules/notifications/outbox.service.js';
 import { collectUsage } from '../modules/usage/usage.service.js';
 import { expireGrants } from '../modules/admin/access-grants.service.js';
 
@@ -94,6 +95,8 @@ export async function cleanup(ctx: AppContext): Promise<void> {
   await exec(ctx.db, 'DELETE FROM password_reset_tokens WHERE expires_at < DATE_SUB(NOW(3), INTERVAL 7 DAY)');
   await exec(ctx.db, 'DELETE FROM sessions WHERE (expires_at < DATE_SUB(NOW(3), INTERVAL 30 DAY)) OR (revoked_at IS NOT NULL AND revoked_at < DATE_SUB(NOW(3), INTERVAL 30 DAY))');
   await exec(ctx.db, "UPDATE tenant_memberships SET status = 'revoked', invitation_token_hash = NULL WHERE status = 'invited' AND invitation_expires_at < NOW(3)");
+  await exec(ctx.db, "UPDATE account_invitations SET status = 'expired', token_hash = NULL WHERE status = 'pending' AND expires_at < NOW(3)");
+  await exec(ctx.db, "DELETE FROM email_outbox WHERE status IN ('sent','cancelled') AND created_at < DATE_SUB(NOW(3), INTERVAL 90 DAY)");
   await exec(ctx.db, "UPDATE domain_verification_tokens SET status = 'expired' WHERE status = 'active' AND expires_at < NOW(3)");
   // Retention: DNS check history (90 days) and succeeded jobs (180 days). Audit logs are retained separately.
   await exec(ctx.db, 'DELETE FROM domain_dns_checks WHERE checked_at < DATE_SUB(NOW(3), INTERVAL 90 DAY)');
@@ -116,6 +119,7 @@ export function createScheduler(ctx: AppContext): Scheduler {
   };
   return {
     async tick() {
+      if (every('outbox', 5_000)) await safe(ctx, 'outbox', () => processOutbox(ctx, 25));
       if (every('lease', 30_000)) await safe(ctx, 'lease', () => reclaimExpired(ctx.db));
       if (every('deletions', 60_000)) await safe(ctx, 'deletions', () => exclusive(ctx, 'deletions', async () => void (await startDueDeletions(ctx))));
       if (every('ownership', 60_000)) await safe(ctx, 'ownership', () => exclusive(ctx, 'ownership', async () => void (await recheckPendingOwnership(ctx))));

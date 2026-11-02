@@ -1,11 +1,11 @@
 export type TenantRole = 'owner' | 'admin' | 'mailbox_user' | 'billing';
-export type PlatformRole = 'none' | 'operations' | 'super_admin';
+export type PlatformRole = 'none' | 'operations' | 'super_admin' | 'support' | 'custom';
 
 export interface Me {
   csrfToken: string;
   mfaPending: boolean;
   mfaSetupRequired: boolean;
-  user: { id: string; email: string; displayName: string; mfaEnabled: boolean; platformRole: PlatformRole; timezone: string; locale: string };
+  user: { id: string; email: string; displayName: string; mfaEnabled: boolean; platformRole: PlatformRole; roleKey?: string | null; permissions?: string[]; timezone: string; locale: string };
   memberships: { tenantId: string; name: string; slug: string; role: TenantRole; tenantStatus: string }[];
 }
 

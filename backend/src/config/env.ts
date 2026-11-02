@@ -81,6 +81,13 @@ const EnvSchema = z.object({
   SMTP_USER: z.string().optional(),
   SMTP_PASSWORD: z.string().optional(),
   MAIL_FROM: z.string().default('ARTHVEX <no-reply@localhost>'),
+  /** Lifetime of admin-issued account invitations. */
+  INVITE_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 30).default(72),
+  /** Minimum gap between invitation resends for the same account. */
+  INVITE_RESEND_COOLDOWN_SECONDS: z.coerce.number().int().min(0).default(60),
+  /** Delivery attempts for a queued email before it is marked failed (retryable by an administrator). */
+  OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().min(1).max(12).default(6),
+  PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(5).max(1440).default(30),
   DEV_OUTBOX_DIR: z.string().default('./var/dev-outbox'),
 
   DNS_RESOLVERS: csv,

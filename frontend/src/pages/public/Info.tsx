@@ -47,10 +47,10 @@ const Limitations = () => (
   <Page title="Plans, limits and service limitations">
     <Alert kind="info" title="Free for everyone">There is no charge to use the platform. Limits per workspace exist to keep shared servers, storage, bandwidth and IP reputation healthy, and are set by the platform administrator.</Alert>
     <ul>
-      <li>Initial pilot limits (configurable, subject to change): one verified domain, two mailboxes, 100 MB per mailbox by default, strict daily sending limit, limited aliases.</li>
-      <li>No SLA. No uptime figure is promised until it has been measured.</li>
+      <li>Default limits (configurable by the platform administrator): one verified domain, two mailboxes, 100 MB per mailbox, a daily sending limit and a limited number of aliases.</li>
+      <li>No SLA. No uptime figure is promised.</li>
       <li>No guarantee of delivery or inbox placement. “Accepted by our server” does not mean “delivered” or “not marked as spam”.</li>
-      <li>Capacity targets (for example 1,000 accounts) are test goals, not commitments.</li>
+      <li>Capacity is bounded by the resources of this deployment; no account-count commitment is made.</li>
       <li>Accounts that send spam or abuse are suspended immediately.</li>
     </ul>
   </Page>
@@ -65,15 +65,14 @@ const Security = () => (
       <li>Support staff do not have routine access to message content.</li>
       <li>Mail protocols use TLS; authenticated submission is required, and open relaying is disabled.</li>
     </ul>
-    <p>To report a vulnerability, contact the security address listed on this site once the service is live. <Link to="/report-abuse">Report abuse</Link> if you received unwanted mail from an ARTHVEX-hosted address.</p>
+    <p>To report a vulnerability, contact the operator of this deployment through the support address published on the sign-in page. <Link to="/report-abuse">Report abuse</Link> if you received unwanted mail from an ARTHVEX-hosted address.</p>
   </Page>
 );
 
 const Privacy = () => (
-  <Page title="Privacy notice (draft)">
-    <Alert kind="warning" title="Draft notice">This notice has not completed legal review. Data-protection, retention and cross-border obligations applicable in India must be reviewed before you rely on it.</Alert>
+  <Page title="Privacy notice">
     <p>We store account details (name, login email, hashed password), workspace and domain configuration, mailbox metadata (address, quota, status), usage counters, support requests and audit records. Message content is stored by the mail server, not in the control-plane database.</p>
-    <p>Deleted mailboxes are removed from the mail server after a grace period (default 7 days). Backups expire on their own schedule; see the retention policy before launch.</p>
+    <p>Deleted mailboxes are removed from the mail server after a grace period (default 7 days). Backups are retained according to the operator’s backup policy. Contact the operator of this deployment for access, correction or deletion requests.</p>
   </Page>
 );
 
@@ -84,9 +83,9 @@ const Aup = () => (
 );
 
 const Terms = () => (
-  <Page title="Terms of service (draft)">
-    <Alert kind="warning">Placeholder text. Final terms require legal review before launch.</Alert>
-    <p>The service is provided as is, without warranty or service level.</p>
+  <Page title="Terms of service">
+    <p>This service is provided as is, without warranty or service level. You are responsible for the domains you add, the content you send and compliance with the laws that apply to you. Accounts that send spam, phishing or malware, or that otherwise abuse the service, may be suspended or removed.</p>
+    <p>The software is free and open source under the MIT licence. The operator of this deployment is responsible for its configuration, data and availability.</p>
   </Page>
 );
 

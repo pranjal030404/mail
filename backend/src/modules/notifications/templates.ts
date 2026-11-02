@@ -30,8 +30,8 @@ export const templates = {
     text: `You have been invited to join the workspace "${tenantName}" as ${role}.\n\nAccept the invitation (valid for 7 days):\n\n${baseUrl}/accept-invitation#token=${token}\n\nYou will need to sign in or register with this email address.`,
   }),
   signupInvitation: (baseUrl: string, token: string) => ({
-    subject: 'Your invitation to the ARTHVEX Email Hosting private beta',
-    text: `You have been invited to the ARTHVEX Email Hosting private beta.\n\nRegister using this link (valid for 14 days):\n\n${baseUrl}/register#invite=${token}\n\nThe beta has strict limits and no SLA. See ${baseUrl}/limitations.`,
+    subject: 'Your invitation to ARTHVEX Email Hosting',
+    text: `You have been invited to ARTHVEX Email Hosting.\n\nRegister using this link (valid for 14 days):\n\n${baseUrl}/register#invite=${token}\n\nLimits and the absence of an SLA are described at ${baseUrl}/limitations.`,
   }),
   forwardingConfirmation: (baseUrl: string, source: string, token: string) => ({
     subject: `Confirm forwarding from ${source}`,

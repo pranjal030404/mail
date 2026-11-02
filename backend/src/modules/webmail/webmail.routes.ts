@@ -1,7 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import type { AppContext } from '../../context.js';
-import { rows } from '../../db/pool.js';
 import { AppError, parse } from '../../shared/errors.js';
 import { requirePlatform } from '../../plugins/session.js';
 import { authorizeMailboxAccess } from '../mailboxes/access.js';
@@ -144,19 +143,7 @@ export async function webmailRoutes(app: FastifyInstance, ctx: AppContext): Prom
     return { grants: await listGrants(ctx, { status: q.status, mine: q.mine === 'true' ? req.auth!.user.id : undefined }) };
   });
 
-  app.get('/admin/mailboxes', async (req) => {
-    requirePlatform(ctx, req, 'admin.read');
-    const q = parse(z.object({ q: z.string().trim().max(120).optional() }), req.query);
-    const list = await rows<{ id: string; address: string; tenant_id: string; tenant_name: string; status: string }>(
-      ctx.db,
-      `SELECT m.id, m.normalized_address AS address, m.tenant_id, t.name AS tenant_name, m.status
-         FROM mailboxes m JOIN tenants t ON t.id = m.tenant_id
-        WHERE m.status NOT IN ('deleted','retained') ${q.q ? 'AND m.normalized_address LIKE ?' : ''}
-        ORDER BY m.normalized_address LIMIT 50`,
-      q.q ? [`%${q.q.replace(/[%_\\]/g, '\\$&')}%`] : [],
-    );
-    return { mailboxes: list.map((m) => ({ ...m, address: String(m.address) })) };
-  });
+  // GET /admin/mailboxes (used by the access-request picker too) lives in admin/console.routes.ts.
 
   app.post('/admin/access-grants', async (req, reply) => {
     const a = requirePlatform(ctx, req, 'admin.access.request');

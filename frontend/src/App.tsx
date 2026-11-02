@@ -9,6 +9,7 @@ const Info = L(() => import('./pages/public/Info'));
 const Auth = L(() => import('./pages/public/Auth'));
 const Dashboard = L(() => import('./pages/dashboard'));
 const Admin = L(() => import('./pages/admin'));
+const Activate = L(() => import('./pages/public/Activate'));
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
             <Route path="*" element={<Info />} />
             <Route path="login/*" element={<Auth />} />
             <Route path="register" element={<Auth />} />
+            <Route path="activate" element={<Activate />} />
             <Route path="verify-email" element={<Auth />} />
             <Route path="forgot-password" element={<Auth />} />
             <Route path="reset-password" element={<Auth />} />

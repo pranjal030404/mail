@@ -1,10 +1,11 @@
-import { Bell, Globe, Inbox, LayoutDashboard, LifeBuoy, LogOut, Mail, Settings, Shield, Users, BarChart3, BookOpen, Forward, ShieldAlert, ListChecks, ScrollText, UserCog, Activity } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { Bell, Globe, Inbox, LayoutDashboard, LifeBuoy, LogOut, Mail, Settings, Shield, Users, BarChart3, Forward, ShieldAlert, ListChecks, ScrollText, UserCog, Activity, Building2, MailPlus, Send, KeyRound, Menu, Sun, Moon } from 'lucide-react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Link, NavLink, Navigate, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { get } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useAsync } from '../lib/useAsync';
 import { AdminLogin } from '../pages/public/AdminLogin';
+import { ToastProvider } from '../pages/admin/kit';
 import { Spinner } from './ui';
 
 export function PublicLayout() {
@@ -105,36 +106,90 @@ export function DashboardLayout() {
   );
 }
 
+interface NavItem { to: string; label: string; icon: ReactNode; perm: string; end?: boolean }
+const ADMIN_NAV: { group: string; items: NavItem[] }[] = [
+  { group: 'Overview', items: [{ to: '/admin', label: 'Dashboard', icon: <Activity size={16} />, perm: 'dashboard.read', end: true }] },
+  { group: 'Organization', items: [
+    { to: '/admin/tenants', label: 'Tenants & workspaces', icon: <Building2 size={16} />, perm: 'tenants.read' },
+    { to: '/admin/domains', label: 'Domains', icon: <Globe size={16} />, perm: 'domains.read' },
+    { to: '/admin/users', label: 'Users', icon: <Users size={16} />, perm: 'users.read' },
+    { to: '/admin/invitations', label: 'Invitations', icon: <MailPlus size={16} />, perm: 'users.read' },
+    { to: '/admin/mailboxes', label: 'Mailboxes', icon: <Inbox size={16} />, perm: 'mailboxes.read' },
+  ] },
+  { group: 'Operations', items: [
+    { to: '/admin/jobs', label: 'Provisioning jobs', icon: <ListChecks size={16} />, perm: 'provisioning.read' },
+    { to: '/admin/notifications', label: 'Email delivery', icon: <Send size={16} />, perm: 'notifications.read' },
+    { to: '/admin/support', label: 'Support tickets', icon: <LifeBuoy size={16} />, perm: 'support.read' },
+    { to: '/admin/abuse', label: 'Abuse reports', icon: <ShieldAlert size={16} />, perm: 'abuse.read' },
+    { to: '/admin/access', label: 'Mailbox access', icon: <KeyRound size={16} />, perm: 'mailbox_access.request' },
+  ] },
+  { group: 'Administration', items: [
+    { to: '/admin/roles', label: 'Roles & permissions', icon: <UserCog size={16} />, perm: 'roles.read' },
+    { to: '/admin/admins', label: 'Administrators', icon: <Shield size={16} />, perm: 'admins.manage' },
+    { to: '/admin/plans', label: 'Plans & quotas', icon: <BarChart3 size={16} />, perm: 'plans.read' },
+    { to: '/admin/settings', label: 'Platform settings', icon: <Settings size={16} />, perm: 'settings.read' },
+    { to: '/admin/audit', label: 'Audit log', icon: <ScrollText size={16} />, perm: 'audit.read' },
+  ] },
+];
+
+type Theme = 'dark' | 'light';
+const readTheme = (): Theme => {
+  try { return localStorage.getItem('arthvex.admin.theme') === 'light' ? 'light' : 'dark'; } catch { return 'dark'; }
+};
+
 export function AdminLayout() {
-  const { me, loading } = useAuth();
+  const { me, loading, logout } = useAuth();
+  const nav = useNavigate();
+  const loc = useLocation();
+  const [theme, setTheme] = useState<Theme>(readTheme);
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    return () => { delete document.documentElement.dataset.theme; };
+  }, [theme]);
+  useEffect(() => setOpen(false), [loc.pathname]);
   if (loading) return <div className="page"><Spinner label="Checking your session" /></div>;
   if (!me) return <AdminLogin />;
+  const perms = new Set(me.user.permissions ?? []);
+  const toggle = () => {
+    const next: Theme = theme === 'dark' ? 'light' : 'dark';
+    setTheme(next);
+    try { localStorage.setItem('arthvex.admin.theme', next); } catch { /* preference is optional */ }
+  };
   return (
     <RequireAuth>
-      {me?.user.platformRole === 'none' ? <Navigate to="/dashboard" replace /> : (
-        <>
+      {me.user.platformRole === 'none' ? <Navigate to="/dashboard" replace /> : (
+        <ToastProvider>
           <a className="skip-link" href="#main">Skip to content</a>
-          <TopBar admin />
+          <header className="topbar">
+            <div className="topbar-in">
+              <button className="btn btn-ghost btn-sm menu-btn" aria-label="Toggle navigation" aria-expanded={open} aria-controls="admin-nav" onClick={() => setOpen(!open)}><Menu size={18} /></button>
+              <Link to="/admin" className="brand">ARTH<span>VEX</span> <small className="muted">Admin</small></Link>
+              <span style={{ flex: 1 }} />
+              <button className="btn btn-ghost btn-sm" onClick={toggle} aria-label={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>{theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}</button>
+              <span className="muted who" title={me.user.email}>{me.user.displayName}{me.user.roleKey ? <small> · {me.user.roleKey.replace(/_/g, ' ')}</small> : null}</span>
+              <button className="btn btn-sm" onClick={async () => { await logout(); nav('/'); }}><LogOut size={14} /> Sign out</button>
+            </div>
+          </header>
           <div className="shell">
-            <nav className="side" aria-label="Admin">
-              {item('/admin', <Activity size={16} />, 'Overview', true)}
-              {item('/admin/tenants', <Users size={16} />, 'Tenants')}
-              {item('/admin/access', <ShieldAlert size={16} />, 'Mailbox access')}
-              {item('/admin/jobs', <ListChecks size={16} />, 'Provisioning')}
-              {item('/admin/abuse', <ShieldAlert size={16} />, 'Abuse')}
-              {item('/admin/support', <LifeBuoy size={16} />, 'Support')}
-              {item('/admin/users', <UserCog size={16} />, 'Users & invites')}
-              {item('/admin/settings', <Settings size={16} />, 'Settings')}
-              {item('/admin/audit', <ScrollText size={16} />, 'Audit log')}
-              <h4>Account</h4>
-              {item('/dashboard/security', <Shield size={16} />, 'My security')}
-              <NavLink to="/help"><BookOpen size={16} />Runbooks</NavLink>
+            <nav id="admin-nav" className={`side${open ? ' open' : ''}`} aria-label="Admin">
+              {ADMIN_NAV.map((g) => {
+                const items = g.items.filter((i) => perms.has(i.perm));
+                if (items.length === 0) return null;
+                return <div key={g.group} className="side-group"><h4>{g.group}</h4>{items.map((i) => item(i.to, i.icon, i.label, i.end))}</div>;
+              })}
+              <div className="side-group">
+                <h4>My account</h4>
+                {item('/dashboard/profile', <UserCog size={16} />, 'Profile')}
+                {item('/dashboard/security', <Shield size={16} />, 'Security & MFA')}
+                <NavLink to="/dashboard/security#sessions"><Activity size={16} />Active sessions</NavLink>
+              </div>
             </nav>
             <main id="main">
-              {me?.mfaSetupRequired ? <Navigate to="/dashboard/security" replace state={{ reason: 'admin-mfa' }} /> : <Outlet />}
+              {me.mfaSetupRequired ? <Navigate to="/dashboard/security" replace state={{ reason: 'admin-mfa' }} /> : <Outlet />}
             </main>
           </div>
-        </>
+        </ToastProvider>
       )}
     </RequireAuth>
   );
