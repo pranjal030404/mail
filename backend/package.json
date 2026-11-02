@@ -16,6 +16,7 @@
     "db:migrate": "tsx --env-file-if-exists=.env src/db/migrate.ts up",
     "db:rollback": "tsx --env-file-if-exists=.env src/db/migrate.ts down",
     "admin:create": "tsx --env-file-if-exists=.env src/scripts/create-admin.ts",
+    "seed:admin": "tsx --env-file-if-exists=.env src/scripts/seed-admin.ts",
     "typecheck": "tsc -p tsconfig.json",
     "test": "vitest run",
     "lint": "eslint ."
