@@ -114,3 +114,4 @@ Backups: `backend/deploy/scripts/backup.sh`; see `backend/docs/deployment.md` an
 cd backend  && npm run typecheck && npm test && npm run lint
 cd frontend && npm run typecheck && npm test && npm run lint && npm run build
 ```
+# mail
